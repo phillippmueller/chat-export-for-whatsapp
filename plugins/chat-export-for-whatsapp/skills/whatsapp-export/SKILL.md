@@ -41,8 +41,7 @@ out which case applies, and call the resulting scripts folder `SCRIPTS`:
 3. **No shell on that computer** (a cloud-only session): if the user can
    attach their phone export (.zip or .txt) to the conversation, you may run
    `import` where you are, after telling them the chat's content will then be
-   processed in this session. Otherwise give them the commands from "Manual
-   use" below to run in their own Terminal, and help them read the output.
+   processed in this session. Otherwise follow "Manual use" below.
 
 Always run the script as `bash SCRIPTS/whatsapp-export.sh ...`, so it works
 even when a copy has lost its executable flag. The reference files mentioned
@@ -66,8 +65,10 @@ WhatsApp can stay open during a Mac export.
 ## Procedure: WhatsApp for macOS
 
 1. **Check readiness.** Run `bash SCRIPTS/whatsapp-export.sh doctor`. It
-   changes nothing. If neither uv nor Python 3.9+ is available, ask before
-   installing uv (`brew install uv` on a Mac).
+   changes nothing. If neither uv nor Python 3.9+ is available, stop and ask
+   the user to install uv themselves, following
+   https://docs.astral.sh/uv/getting-started/installation/ . Don't install it
+   for them.
 2. **Find the exact chat names.** Run `bash SCRIPTS/whatsapp-export.sh list`.
    Each line is the chat name, a tab, then its type and message count. Match
    what the user asked for ("my chat with Anna") against the names. If several
@@ -178,15 +179,11 @@ report.
 
 ## Manual use
 
-The same script works without Claude, in the user's own Terminal:
+Without a shell on the computer with the data, point the user to the "Use it
+without Claude" section of
+https://github.com/phillippmueller/chat-export-for-whatsapp and help them read
+the output they paste back. The script's commands are the same ones used
+above: `doctor`, `list`, `export`, `update`, `import`, `inspect` and `help`.
 
-```bash
-brew install uv                       # once, on a Mac (or have Python 3.9+)
-git clone https://github.com/phillippmueller/chat-export-for-whatsapp.git ~/chat-export-for-whatsapp
-cd ~/chat-export-for-whatsapp/plugins/chat-export-for-whatsapp/skills/whatsapp-export/scripts
-./whatsapp-export.sh doctor
-./whatsapp-export.sh list
-./whatsapp-export.sh export --chats "Exact Name"
-./whatsapp-export.sh import ~/Downloads/"WhatsApp Chat - Family.zip" --me "Your Name"
-./whatsapp-export.sh help
-```
+For errors, read `reference/troubleshooting.md`. For the data format, read
+`reference/data-format.md`.
