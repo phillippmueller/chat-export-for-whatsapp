@@ -198,6 +198,16 @@ class FakeData(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("No chat named: Nobody", err)
 
+    def test_names_without_invisible_marks_and_with_commas(self):
+        import sqlite3
+        conn = sqlite3.connect(self.container / "ChatStorage.sqlite")
+        conn.execute("UPDATE ZWACHATSESSION SET ZPARTNERNAME = '\u202aTrip, 08.07. \u202c' WHERE Z_PK = 2")
+        conn.commit()
+        conn.close()
+        out = self.export("--chats", "Trip, 08.07.,Anna Muster")
+        names = sorted(c["name"] for c in read_jsonl(out / "chats.jsonl"))
+        self.assertEqual(names, ["Anna Muster", "Trip, 08.07."])
+
     def test_no_data(self):
         out = self.export("--no-data")
         self.assertFalse((out / "messages.jsonl").exists())

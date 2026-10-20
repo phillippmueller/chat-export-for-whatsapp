@@ -144,6 +144,17 @@ def phone_from_jid(jid: Optional[str]) -> Optional[str]:
     return None
 
 
+# Direction marks WhatsApp puts around names and numbers ("\u202a+41 79 …\u202c").
+# They are invisible, so nobody can type them in --chats; names drop them.
+BIDI_MARKS = dict.fromkeys(map(ord, "\u200e\u200f\u202a\u202b\u202c\u202d\u202e\u2066\u2067\u2068\u2069\ufeff"), None)
+
+
+def clean_name(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    return value.translate(BIDI_MARKS).strip() or None
+
+
 def short_hash(*parts: Any, length: int = 20) -> str:
     h = hashlib.sha256("\x1f".join("" if p is None else str(p) for p in parts).encode("utf-8"))
     return h.hexdigest()[:length]
@@ -375,7 +386,7 @@ def address_book(container: Path, workdir: Path) -> dict[str, JsonDict]:
             continue
         if "@" not in jid:
             jid += "@s.whatsapp.net"
-        entry = {"name": row["ZFULLNAME"], "phone": phone_from_jid(jid)}
+        entry = {"name": clean_name(row["ZFULLNAME"]), "phone": phone_from_jid(jid)}
         result[jid] = entry
         if row["ZLID"]:
             lid = row["ZLID"] if "@" in row["ZLID"] else row["ZLID"] + "@lid"
@@ -405,7 +416,7 @@ def quoted_key(metadata: Any) -> Optional[str]:
 
 
 def chat_label(row: sqlite3.Row) -> str:
-    return row["ZPARTNERNAME"] or phone_from_jid(row["ZCONTACTJID"]) or row["ZCONTACTJID"] or "Unknown"
+    return clean_name(row["ZPARTNERNAME"]) or phone_from_jid(row["ZCONTACTJID"]) or row["ZCONTACTJID"] or "Unknown"
 
 
 def desktop_chats(conn: sqlite3.Connection) -> list[JsonDict]:
@@ -435,15 +446,35 @@ def desktop_chats(conn: sqlite3.Connection) -> list[JsonDict]:
 
 
 def select_chats(chats: list[JsonDict], wanted: Optional[str]) -> list[JsonDict]:
+    """Pick chats by the comma-separated names given with --chats.
+
+    Names may contain commas themselves ("Trip, 08.07."), so the longest run of
+    comma-separated parts that matches a chat name wins. Matching ignores
+    invisible direction marks, surrounding spaces and, as a fallback, case.
+    """
     if not wanted:
         return chats
-    names = [w.strip() for w in wanted.split(",") if w.strip()]
-    picked, missing = [], []
-    for name in names:
-        hits = [c for c in chats if c["name"] == name or c["jid"] == name]
-        if not hits:
-            hits = [c for c in chats if c["name"].casefold() == name.casefold()]
-        (picked.extend(hits) if hits else missing.append(name))
+
+    def find(name: str) -> list[JsonDict]:
+        key = clean_name(name) or ""
+        hits = [c for c in chats if clean_name(c["name"]) == key or c["jid"] == key]
+        return hits or [c for c in chats if (clean_name(c["name"]) or "").casefold() == key.casefold()]
+
+    parts = wanted.split(",")
+    picked: list[JsonDict] = []
+    missing: list[str] = []
+    i = 0
+    while i < len(parts):
+        for j in range(len(parts), i, -1):
+            hits = find(",".join(parts[i:j]))
+            if hits:
+                picked.extend(hits)
+                i = j
+                break
+        else:
+            if parts[i].strip():
+                missing.append(parts[i].strip())
+            i += 1
     if missing:
         raise UserError("No chat named: " + ", ".join(missing) + " (see the exact names with 'list')")
     unique = {c["pk"]: c for c in picked}
@@ -464,7 +495,7 @@ def read_desktop(container: Path, wanted: Optional[str], since: Optional[datetim
 
     push_names: dict[str, str] = {}
     if {"ZJID", "ZPUSHNAME"} <= push_cols:
-        push_names = {r[0]: r[1] for r in conn.execute("SELECT ZJID, ZPUSHNAME FROM ZWAPROFILEPUSHNAME") if r[0] and r[1]}
+        push_names = {r[0]: clean_name(r[1]) for r in conn.execute("SELECT ZJID, ZPUSHNAME FROM ZWAPROFILEPUSHNAME") if r[0] and clean_name(r[1])}
 
     all_chats = desktop_chats(conn)
     # Names of direct chats are the best names for those people.
@@ -480,7 +511,7 @@ def read_desktop(container: Path, wanted: Optional[str], since: Optional[datetim
         if not jid:
             return None
         book = contacts.get(jid, {})
-        name = partner.get(jid) or book.get("name") or hint or push_names.get(jid)
+        name = partner.get(jid) or book.get("name") or clean_name(hint) or push_names.get(jid)
         phone = phone_from_jid(jid) or book.get("phone")
         return data.add_person({
             "person_id": jid, "jid": jid, "name": name or phone or jid.split("@")[0],
