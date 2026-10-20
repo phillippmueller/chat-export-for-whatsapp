@@ -118,6 +118,8 @@ def build_desktop(root: Path, later: bool) -> None:
         (10, 2, 1, t + 3780, "Count me in! https://example.org/route", 7, None, "3EB0BBBBBBBBBBBBBBBB03", 0),
         (11, 3, 0, t + 3800, "a status update", 0, None, "3EB0CCCCCCCCCCCCCCCC01", 0),
     ]
+    # WhatsApp sometimes keeps a second copy of a message; the export keeps one.
+    msgs.append((13, 1, 0, t + 60, "Hi! Are we still on for Friday?", 0, None, "3EB0AAAAAAAAAAAAAAAA01", 0))
     if later:
         msgs.append((12, 1, 0, t + 86400, "See you tomorrow!", 0, None, "3EB0AAAAAAAAAAAAAAAA07", 0))
     for pk, chat, me, unix, text, kind, member, stanza, starred in msgs:
@@ -143,7 +145,16 @@ def build_desktop(root: Path, later: bool) -> None:
         c = sqlite3.connect(contacts)
         c.execute("CREATE TABLE ZWAADDRESSBOOKCONTACT (Z_PK INTEGER PRIMARY KEY, ZWHATSAPPID TEXT, ZFULLNAME TEXT, ZPHONENUMBER TEXT, ZLID TEXT)")
         c.execute("INSERT INTO ZWAADDRESSBOOKCONTACT VALUES (1, '4915112345678', 'Anna Muster', '+49 151 12345678', NULL)")
-        c.execute("INSERT INTO ZWAADDRESSBOOKCONTACT VALUES (2, '41790000000', 'Carla Beispiel', '+41 79 000 00 00', '123456789012345')")
+        c.execute("INSERT INTO ZWAADDRESSBOOKCONTACT VALUES (2, '41790000000', 'Carla Beispiel', '+41 79 000 00 00', NULL)")
+        c.commit()
+        c.close()
+
+    # Hidden-number IDs (LIDs) and the phone numbers WhatsApp knows for them.
+    lid_db = container / "LID.sqlite"
+    if not lid_db.exists():
+        c = sqlite3.connect(lid_db)
+        c.execute("CREATE TABLE ZWAZACCOUNT (Z_PK INTEGER PRIMARY KEY, ZIDENTIFIER TEXT, ZPHONENUMBER TEXT, ZDISPLAYNAME TEXT)")
+        c.execute("INSERT INTO ZWAZACCOUNT VALUES (1, ?, '41790000000', NULL)", (CARLA_LID,))
         c.commit()
         c.close()
 

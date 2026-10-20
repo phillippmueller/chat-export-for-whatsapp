@@ -161,8 +161,11 @@ class FakeData(unittest.TestCase):
         self.assertEqual(set(chats), {"Anna Muster", "Wandergruppe"}, "status and empty chats are left out")
         self.assertEqual(chats["Wandergruppe"]["type"], "group")
         self.assertEqual(len(msgs), 10)
-        carla = people[fake.CARLA_LID]
-        self.assertEqual((carla["name"], carla["phone"]), ("Carla Beispiel", "+41790000000"), "LID resolved via contacts")
+        self.assertNotIn(fake.CARLA_LID, people, "LID mapped to the phone-number ID")
+        carla = people["41790000000@s.whatsapp.net"]
+        self.assertEqual((carla["name"], carla["phone"], carla["lid"]),
+                         ("Carla Beispiel", "+41790000000", fake.CARLA_LID), "LID resolved via LID.sqlite")
+        self.assertEqual(len([m for m in msgs if m["text"] == "Hi! Are we still on for Friday?"]), 1, "duplicate row dropped")
         by_text = {m["text"]: m for m in msgs}
         reply = by_text["Haha, perfect"]["reply_to"]
         self.assertTrue(reply["found"])
@@ -213,6 +216,39 @@ class FakeData(unittest.TestCase):
         self.assertEqual(code, 1)
         self.assertIn("did you mean: Anna Muster?", err)
 
+    def test_media_not_on_this_mac_is_listed_as_missing(self):
+        import sqlite3
+        conn = sqlite3.connect(self.container / "ChatStorage.sqlite")
+        conn.execute("UPDATE ZWAMEDIAITEM SET ZMEDIALOCALPATH = NULL WHERE ZMESSAGE = 3")
+        conn.commit()
+        conn.close()
+        out = self.export()
+        photo = next(m for m in read_jsonl(out / "messages.jsonl") if m["text"] == "Sunset")
+        self.assertEqual(photo["type"], "image")
+        self.assertEqual(len(photo["attachments"]), 1)
+        self.assertTrue(photo["attachments"][0]["missing"])
+        self.assertIsNone(photo["attachments"][0]["path"])
+
+    def test_unknown_types_are_labelled_in_html(self):
+        import sqlite3
+        conn = sqlite3.connect(self.container / "ChatStorage.sqlite")
+        conn.execute("UPDATE ZWAMESSAGE SET ZMESSAGETYPE = 59, ZTEXT = NULL WHERE Z_PK = 4")
+        conn.commit()
+        conn.close()
+        out = self.export()
+        page = (out / "AnnaMuster" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("WhatsApp type 59", page)
+
+    def test_status_and_channels_are_left_out(self):
+        import sqlite3
+        conn = sqlite3.connect(self.container / "ChatStorage.sqlite")
+        conn.execute("INSERT INTO ZWACHATSESSION VALUES (9, '1203@newsletter', 'Some Channel', NULL, 5, NULL)")
+        conn.execute("INSERT INTO ZWAMESSAGE (Z_PK, ZCHATSESSION, ZISFROMME, ZMESSAGEDATE, ZTEXT, ZMESSAGETYPE) VALUES (50, 9, 0, 800000000, 'news', 0)")
+        conn.commit()
+        conn.close()
+        out = self.export()
+        self.assertNotIn("Some Channel", [c["name"] for c in read_jsonl(out / "chats.jsonl")])
+
     def test_no_data(self):
         out = self.export("--no-data")
         self.assertFalse((out / "messages.jsonl").exists())
@@ -224,7 +260,7 @@ class FakeData(unittest.TestCase):
         # Simulate the app no longer holding an old message.
         import sqlite3
         conn = sqlite3.connect(self.container / "ChatStorage.sqlite")
-        conn.execute("DELETE FROM ZWAMESSAGE WHERE Z_PK = 1")
+        conn.execute("DELETE FROM ZWAMESSAGE WHERE ZSTANZAID = '3EB0AAAAAAAAAAAAAAAA01'")
         conn.commit()
         conn.close()
         second = self.root / "second"
@@ -265,7 +301,7 @@ class FakeData(unittest.TestCase):
 
     def test_inspect_shows_no_content(self):
         text = wa.inspect_database(self.container / "ChatStorage.sqlite")
-        self.assertIn("ZWAMESSAGE (11 rows)", text)
+        self.assertIn("ZWAMESSAGE (12 rows)", text)
         self.assertNotIn("Friday", text)
 
     def test_phone_import(self):

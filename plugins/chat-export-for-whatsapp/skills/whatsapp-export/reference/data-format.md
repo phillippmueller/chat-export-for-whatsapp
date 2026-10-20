@@ -43,7 +43,7 @@ source a record came from:
 
 | ID | desktop | phone-export |
 | :- | :- | :- |
-| `person_id` | The person's WhatsApp ID (`<number>@s.whatsapp.net`, or `<id>@lid` where WhatsApp hides the number); `me` for you | `name:<name as shown>`, `phone:+<number>` if only a number was shown; `me` for you (with `--me`) |
+| `person_id` | The person's WhatsApp ID, `<number>@s.whatsapp.net`. Where WhatsApp shows only a hidden-number ID (`<id>@lid`, common in groups), it is mapped to the phone-number ID when WhatsApp knows the number, else the `@lid` ID is used. `me` for you | `name:<name as shown>`, `phone:+<number>` if only a number was shown; `me` for you (with `--me`) |
 | `chat_id` | `wa:<chat's WhatsApp ID>`, the same on every device | `txt:<hash of the chat name>` |
 | `message_id` | `<chat_id>:<sender>:<WhatsApp message ID>`, the same on every device | `<chat_id>:<hash of time, sender and text>`, the same for every import of the same chat |
 | `wa_key` | WhatsApp's own message ID | null |
@@ -83,8 +83,9 @@ The `sha256` values let you verify that no file was changed or cut off.
 | Field | Type | Meaning |
 | :- | :- | :- |
 | `person_id` | string | Stable ID (see above) |
-| `jid` | string or null | WhatsApp ID, desktop only |
-| `name` | string or null | Name from your contacts or the chat, else the push name or number; "Me" for you |
+| `jid` | string or null | Phone-number WhatsApp ID, desktop only |
+| `lid` | string or null | Hidden-number ID (`…@lid`) WhatsApp also uses for this person, desktop only |
+| `name` | string | Name from your direct chat or contacts, else the group member list, WhatsApp's display name or the person's profile name, else the phone number (or the hidden ID if WhatsApp doesn't know the number); "Me" for you |
 | `push_name` | string or null | Name the person set in their WhatsApp profile, desktop only |
 | `phone` | string or null | Phone number in E.164 format, if known |
 | `is_me` | boolean | True for the account owner |
@@ -167,6 +168,11 @@ ON CONFLICT (message_id) DO UPDATE SET data = EXCLUDED.data;
 - With `update` (or `--from`), the data files hold the earlier export's
   records plus everything new. Records present in both come from the new
   read.
+- WhatsApp sometimes stores the same message twice (for example after a history
+  sync). The export keeps one copy.
+- The Status feed and channels you follow are left out.
+- Messages of kinds this version doesn't recognise yet are kept with type
+  `other` and their code in `wa_type`, and shown as a short note in the HTML.
 - Group notices without readable text (WhatsApp stores many as codes) are kept
   in `messages.jsonl` with type `system` and empty text, but not shown in the
   HTML.

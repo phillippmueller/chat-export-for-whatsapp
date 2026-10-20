@@ -4,6 +4,25 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed (from the first test on real data)
+
+- People who appear in groups only under a hidden-number ID (`…@lid`) are now
+  mapped to their phone number via WhatsApp's `LID.sqlite`, so one person gets
+  one record and a real name instead of a number. Real names now win over
+  chat names that are just phone numbers.
+- Messages WhatsApp stores twice are exported once (they caused duplicate
+  `message_id`s).
+- Photos, voice notes and other media that were never downloaded to the Mac
+  now appear as missing attachments instead of empty messages.
+- The Status feed and followed channels are left out.
+- Messages of unknown kinds show a short note in the HTML instead of an empty
+  bubble.
+- `--chats` matches names with commas and with WhatsApp's invisible direction
+  marks (as around phone numbers), suggests close names when nothing matches,
+  and says when a name fits several chats.
+
 ## [0.1.0] - 2026-10-20
 
 ### Added

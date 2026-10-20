@@ -54,7 +54,7 @@ Everything happens on your computer.
   scripts use only Python's standard library.
 - **Reads:** on a Mac, WhatsApp's data folder
   (`~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared`): a
-  private, temporary copy of its chat and contacts databases, and the media
+  private, temporary copy of its chat, contacts and ID databases, and the media
   files of the chats you export. For phone exports, only the files you name.
 - **Writes:** only the new export folder you choose, by default a new folder
   under `~/whatsapp-chats/`. It never changes WhatsApp's data.

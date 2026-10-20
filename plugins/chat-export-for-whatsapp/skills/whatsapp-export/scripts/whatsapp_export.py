@@ -156,6 +156,10 @@ def clean_name(value: Any) -> Optional[str]:
     return value.translate(BIDI_MARKS).strip() or None
 
 
+def looks_like_number(name: str) -> bool:
+    return bool(re.fullmatch(r"[+\d\s()\-.\u2011]{5,}", name))
+
+
 def short_hash(*parts: Any, length: int = 20) -> str:
     h = hashlib.sha256("\x1f".join("" if p is None else str(p) for p in parts).encode("utf-8"))
     return h.hexdigest()[:length]
@@ -263,6 +267,7 @@ DESKTOP_TYPES = {
     6: "system",
     7: "link",
     8: "document",
+    10: "system",
     11: "gif",
     14: "deleted",
     15: "sticker",
@@ -271,7 +276,9 @@ NEEDED = {
     "ZWACHATSESSION": ["Z_PK", "ZCONTACTJID", "ZPARTNERNAME"],
     "ZWAMESSAGE": ["Z_PK", "ZCHATSESSION", "ZISFROMME", "ZMESSAGEDATE", "ZTEXT", "ZMESSAGETYPE"],
 }
+MEDIA_KINDS = ("image", "video", "audio", "document", "gif", "sticker")
 HIDDEN_JIDS = {"status@broadcast"}
+HIDDEN_SUFFIXES = ("@status", "@lid.status", "@newsletter")
 
 
 def open_snapshot(db_path: Path, workdir: Path) -> sqlite3.Connection:
@@ -396,6 +403,45 @@ def address_book(container: Path, workdir: Path) -> dict[str, JsonDict]:
     return result
 
 
+def lid_accounts(container: Path, workdir: Path) -> dict[str, JsonDict]:
+    """Phone numbers and names for hidden-number IDs (…@lid), from LID.sqlite.
+
+    Newer WhatsApp versions identify many people, especially in groups, by a
+    "LID" instead of their phone number. LID.sqlite maps them back, where
+    WhatsApp knows the number.
+    """
+    path = container / "LID.sqlite"
+    if not path.is_file():
+        return {}
+    try:
+        sub = workdir / "lid"
+        sub.mkdir(exist_ok=True)
+        conn = open_snapshot(path, sub)
+    except UserError:
+        return {}
+    have = columns(conn, "ZWAZACCOUNT")
+    result: dict[str, JsonDict] = {}
+    if "ZIDENTIFIER" in have:
+        cols = ", ".join(col(have, "ZWAZACCOUNT", c) for c in ("ZIDENTIFIER", "ZPHONENUMBER", "ZDISPLAYNAME"))
+        for row in conn.execute(f"SELECT {cols} FROM ZWAZACCOUNT"):
+            lid = row["ZIDENTIFIER"]
+            if not lid or not lid.endswith("@lid"):
+                continue
+            digits = re.sub(r"\D", "", str(row["ZPHONENUMBER"] or "").split("@")[0])
+            result[lid] = {"phone_jid": f"{digits}@s.whatsapp.net" if digits else None,
+                           "name": clean_name(row["ZDISPLAYNAME"])}
+    pair = columns(conn, "ZWAPHONENUMBERLIDPAIR")
+    if {"ZLID", "ZPHONENUMBER"} <= pair:
+        for lid, number in conn.execute("SELECT ZLID, ZPHONENUMBER FROM ZWAPHONENUMBERLIDPAIR"):
+            if lid and number:
+                lid = lid if "@" in lid else lid + "@lid"
+                digits = re.sub(r"\D", "", str(number).split("@")[0])
+                if digits:
+                    result.setdefault(lid, {"name": None})["phone_jid"] = f"{digits}@s.whatsapp.net"
+    conn.close()
+    return result
+
+
 def quoted_key(metadata: Any) -> Optional[str]:
     """The quoted message's ID from a media item's metadata (protobuf field 5)."""
     if not isinstance(metadata, (bytes, bytearray)) or len(metadata) < 3 or metadata[0] != 0x2A:
@@ -433,7 +479,7 @@ def desktop_chats(conn: sqlite3.Connection) -> list[JsonDict]:
     chats = []
     for row in conn.execute(sql):
         jid = row["ZCONTACTJID"] or ""
-        if jid in HIDDEN_JIDS or not row["n"]:
+        if jid in HIDDEN_JIDS or jid.endswith(HIDDEN_SUFFIXES) or not row["n"]:
             continue
         if row["ZGROUPINFO"] is not None or jid.endswith("@g.us"):
             kind = "group"
@@ -500,6 +546,7 @@ def read_desktop(container: Path, wanted: Optional[str], since: Optional[datetim
     check_schema(conn)
     data = Dataset(source="desktop", inputs=["ChatStorage.sqlite"])
     contacts = address_book(container, workdir)
+    lids = lid_accounts(container, workdir)
 
     msg_cols = columns(conn, "ZWAMESSAGE")
     media_cols = columns(conn, "ZWAMEDIAITEM")
@@ -521,17 +568,44 @@ def read_desktop(container: Path, wanted: Optional[str], since: Optional[datetim
             members[r["Z_PK"]] = dict(r)
 
     def person(jid: Optional[str], hint: Optional[str] = None) -> Optional[str]:
+        """The person_id for a WhatsApp ID, creating or improving the record.
+
+        Hidden-number IDs (…@lid) are mapped to the phone-number ID when
+        WhatsApp knows it, so one person gets one record. Names come, in this
+        order, from: the direct chat's name, your contacts, the group member
+        list, WhatsApp's display name, the person's profile name.
+        """
         if not jid:
             return None
-        book = contacts.get(jid, {})
-        name = partner.get(jid) or book.get("name") or clean_name(hint) or push_names.get(jid)
-        phone = phone_from_jid(jid) or book.get("phone")
-        return data.add_person({
-            "person_id": jid, "jid": jid, "name": name or phone or jid.split("@")[0],
-            "push_name": push_names.get(jid), "phone": phone, "is_me": False,
+        lid = jid if jid.endswith("@lid") else None
+        main = (lids.get(lid, {}).get("phone_jid") if lid else None) or jid
+        keys = [k for k in (main, lid) if k]
+        def first(source: dict[str, Any], field: Optional[str] = None) -> Optional[str]:
+            for k in keys:
+                value = source.get(k)
+                if isinstance(value, dict):
+                    value = value.get(field) if field else None
+                if value:
+                    return value
+            return None
+        push = first(push_names)
+        candidates = [first(partner), first(contacts, "name"), clean_name(hint), first(lids, "name"), push]
+        # A chat named after a phone number is a weaker name than any real one.
+        name = (next((c for c in candidates if c and not looks_like_number(c)), None)
+                or next((c for c in candidates if c), None))
+        phone = phone_from_jid(main) or first(contacts, "phone")
+        pid = data.add_person({
+            "person_id": main, "jid": main if main.endswith("@s.whatsapp.net") else None,
+            "lid": lid, "name": name, "push_name": push, "phone": phone, "is_me": False,
         })
+        known = data.people[pid]
+        rank = 0 if not name else (1 if looks_like_number(name) else 2)
+        if rank > known.get("_rank", 0):
+            known["name"], known["_rank"] = name, rank
+        return pid
 
-    data.add_person({"person_id": ME, "jid": None, "name": "Me", "push_name": None, "phone": None, "is_me": True})
+    data.add_person({"person_id": ME, "jid": None, "lid": None, "name": "Me", "push_name": None,
+                     "phone": None, "is_me": True, "_rank": 9})
 
     chosen = select_chats(all_chats, wanted)
     media_join = "LEFT JOIN ZWAMEDIAITEM i ON i.ZMESSAGE = m.Z_PK" if "ZMESSAGE" in media_cols else ""
@@ -566,10 +640,17 @@ def read_desktop(container: Path, wanted: Optional[str], since: Optional[datetim
 
         sql = f"SELECT {select} FROM ZWAMESSAGE m {media_join} WHERE m.ZCHATSESSION = ? ORDER BY m.ZMESSAGEDATE, m.Z_PK"
         seen_pk: set[int] = set()
+        seen_stanza: dict[str, JsonDict] = {}
         for row in conn.execute(sql, (chat["pk"],)):
             if row["Z_PK"] in seen_pk:  # several media rows for one message
                 continue
             seen_pk.add(row["Z_PK"])
+            # WhatsApp sometimes stores the same message twice (for example
+            # after a history sync); keep one copy.
+            if row["ZSTANZAID"] and row["ZSTANZAID"] in seen_stanza:
+                if row["ZSTARRED"]:
+                    seen_stanza[row["ZSTANZAID"]]["starred"] = True
+                continue
             sent = apple_time(row["ZMESSAGEDATE"])
             if not in_range(sent, since, until):
                 continue
@@ -607,6 +688,9 @@ def read_desktop(container: Path, wanted: Optional[str], since: Optional[datetim
                 ctype = vtype if (isinstance(vtype, str) and re.fullmatch(r"[\w.+-]+/[\w.+-]+", vtype)) else guess_type(name)
                 size = row["ZFILESIZE"] if isinstance(row["ZFILESIZE"], int) and row["ZFILESIZE"] > 0 else None
                 attachments.append(Attachment(name, ctype, size, src if src.is_file() else None, missing=not src.is_file()))
+            elif kind in MEDIA_KINDS:
+                # Known media that was never downloaded to this Mac.
+                attachments.append(Attachment(None, None, None, None, missing=True))
             if kind == "contact" and isinstance(row["ZVCARDSTRING"], str) and "BEGIN:VCARD" in row["ZVCARDSTRING"]:
                 card_name = safe_file_name((row["ZVCARDNAME"] or "contact").split("_$!<")[0]) + ".vcf"
                 attachments.append(Attachment(card_name, "text/vcard", None, ("text", row["ZVCARDSTRING"])))
@@ -628,9 +712,18 @@ def read_desktop(container: Path, wanted: Optional[str], since: Optional[datetim
             data.messages.append(record)
             if stanza:
                 by_key[(chat_id, stanza)] = record
+                seen_stanza[stanza] = record
             quoted = quoted_key(row["ZMETADATA"])
             if quoted:
                 pending_replies.append((record, quoted))
+
+    for p in data.people.values():
+        if not p.get("name"):
+            p["name"] = p.get("phone") or (p.get("lid") or p["person_id"]).split("@")[0]
+        p.pop("_rank", None)
+    for record in data.messages:
+        if record["sender_id"]:
+            record["sender_name"] = data.people[record["sender_id"]]["name"]
 
     # Link replies once every message is known. Older WhatsApp versions store
     # only the first 17 characters of the quoted ID, so match on that too.
@@ -1050,6 +1143,11 @@ def media_html(att: JsonDict, rel: str) -> str:
     return f'<div>📎 <a href="{href}">{name}</a></div>'
 
 
+def unsupported(m: JsonDict) -> str:
+    code = f" {m['wa_type']}" if m.get("wa_type") is not None else ""
+    return f"[message of a kind this export can't show yet (WhatsApp type{code})]"
+
+
 def render_chat(chat: JsonDict, messages: list[JsonDict], zone: tzinfo, by_id: dict[str, JsonDict]) -> tuple[str, str]:
     folder = chat["folder"]
     title = html.escape(chat["name"] or "Chat")
@@ -1102,6 +1200,8 @@ def render_chat(chat: JsonDict, messages: list[JsonDict], zone: tzinfo, by_id: d
             body.append(f'<div>📍 <a href="{html.escape(url, quote=True)}">{lat:.5f}, {lon:.5f}</a></div>')
         if m["text"]:
             body.append(f'<div class="text">{linkify(m["text"])}</div>')
+        elif not (m["attachments"] or m["deleted"] or m["location"]):
+            body.append(f'<div class="text missing">{unsupported(m)}</div>')
         body.append(f'<div class="meta">{"★ " if m.get("starred") else ""}{clock}</div>')
         parts.append(f'<div class="{cls}">{"".join(body)}</div>')
 
@@ -1122,6 +1222,8 @@ def render_chat(chat: JsonDict, messages: list[JsonDict], zone: tzinfo, by_id: d
             line.append(f"📍 {m['location']['latitude']}, {m['location']['longitude']}")
         if m["text"]:
             line.append(m["text"])
+        elif not (m["attachments"] or m["deleted"] or m["location"]):
+            line.append(f"*{unsupported(m)}*")
         md.append("  \n".join(line))
         md.append("")
     parts.append("</main></body></html>\n")

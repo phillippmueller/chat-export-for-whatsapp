@@ -175,8 +175,8 @@ Everything happens on your computer. In detail:
   standard library, so no packages are installed.
 - **Reads:** on a Mac, WhatsApp's data folder
   (`~/Library/Group Containers/group.net.whatsapp.WhatsApp.shared`): the chat
-  database `ChatStorage.sqlite`, the contacts database `ContactsV2.sqlite`
-  for names, and the media files of the chats you export. The databases are
+  database `ChatStorage.sqlite`, `ContactsV2.sqlite` and `LID.sqlite` for
+  names and phone numbers, and the media files of the chats you export. The databases are
   copied to a private temporary folder first and only that copy is read; the
   copy is deleted afterwards. For imports, only the files you name.
 - **Writes:** only the new export folder you choose (by default a new folder
