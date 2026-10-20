@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Lint and test (${{ matrix.os }}, Python ${{ matrix.python }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.9", "3.13"]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+
+      - name: Install shellcheck
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then brew install shellcheck; else sudo apt-get install -y shellcheck; fi
+
+      - name: Lint shell scripts
+        run: shellcheck plugins/chat-export-for-whatsapp/skills/whatsapp-export/scripts/*.sh tests/*.sh
+
+      # On macOS these run under the system bash 3.2, which is what most Mac
+      # users get, so this also checks compatibility with it.
+      - name: Script tests
+        run: tests/test_cli.sh
+
+      - name: Converter tests
+        run: python -m unittest discover -s tests -p "test_*.py" -v
+
+      # Without uv on the runner, the script uses the python3 set up above,
+      # so this also checks the oldest supported Python.
+      - name: End-to-end test (fake WhatsApp data)
+        run: tests/test_e2e.sh
+
+  e2e-uv:
+    name: End-to-end with uv (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v6
+      - name: End-to-end test through uv
+        run: tests/test_e2e.sh
+
+  validate-plugin:
+    name: Validate Claude plugin
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Validate marketplace and plugin
+        run: |
+          npx -y @anthropic-ai/claude-code@2.1.304 plugin validate --strict .
+          npx -y @anthropic-ai/claude-code@2.1.304 plugin validate --strict plugins/chat-export-for-whatsapp

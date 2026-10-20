@@ -1,0 +1,15 @@
+{
+  "name": "chat-export-for-whatsapp",
+  "description": "Chat Export for WhatsApp (unofficial), by Philip Mueller",
+  "owner": {
+    "name": "Philip Mueller",
+    "url": "https://github.com/phillippmueller"
+  },
+  "plugins": [
+    {
+      "name": "chat-export-for-whatsapp",
+      "source": "./plugins/chat-export-for-whatsapp",
+      "description": "Export your WhatsApp chats to HTML, Markdown and machine-readable JSON Lines on your own computer, from WhatsApp for macOS or from WhatsApp's own chat exports. Unofficial."
+    }
+  ]
+}

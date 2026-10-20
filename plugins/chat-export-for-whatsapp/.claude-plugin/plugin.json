@@ -1,0 +1,24 @@
+{
+  "name": "chat-export-for-whatsapp",
+  "displayName": "Chat Export for WhatsApp (unofficial)",
+  "version": "0.1.0",
+  "description": "Export your WhatsApp chats on your own computer to readable HTML and Markdown, plus machine-readable JSON Lines with stable IDs and a manifest. Reads WhatsApp for macOS directly, or converts chats exported from a phone. Update earlier exports with newer messages. Unofficial; not affiliated with WhatsApp or Meta.",
+  "author": {
+    "name": "Philip Mueller",
+    "email": "philip.mueller.bueckeburg@gmail.com",
+    "url": "https://github.com/phillippmueller"
+  },
+  "homepage": "https://github.com/phillippmueller/chat-export-for-whatsapp",
+  "repository": "https://github.com/phillippmueller/chat-export-for-whatsapp",
+  "license": "MIT",
+  "keywords": [
+    "whatsapp",
+    "export",
+    "backup",
+    "chat",
+    "messages",
+    "archive",
+    "jsonl",
+    "data"
+  ]
+}

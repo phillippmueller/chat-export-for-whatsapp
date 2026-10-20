@@ -1,0 +1,19 @@
+# WhatsApp exports are private, unencrypted messages: never commit them.
+whatsapp-chats/
+export-*/
+exports/
+*.sqlite
+*.sqlite-*
+_chat.txt
+WhatsApp Chat*
+WhatsApp-Chat*
+
+# OS and editor clutter
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Python
+__pycache__/
+*.pyc
