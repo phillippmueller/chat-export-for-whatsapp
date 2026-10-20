@@ -208,6 +208,11 @@ class FakeData(unittest.TestCase):
         names = sorted(c["name"] for c in read_jsonl(out / "chats.jsonl"))
         self.assertEqual(names, ["Anna Muster", "Trip, 08.07."])
 
+    def test_unknown_name_suggests_close_names(self):
+        code, err = run("export", "--source", str(self.container), "--out", str(self.root / "s"), "--chats", "Anna")
+        self.assertEqual(code, 1)
+        self.assertIn("did you mean: Anna Muster?", err)
+
     def test_no_data(self):
         out = self.export("--no-data")
         self.assertFalse((out / "messages.jsonl").exists())

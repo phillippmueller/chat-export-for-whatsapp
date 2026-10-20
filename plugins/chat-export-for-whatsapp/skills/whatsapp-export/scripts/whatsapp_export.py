@@ -20,6 +20,7 @@ whatsapp-export.sh; run with --help for the commands.
 from __future__ import annotations
 
 import argparse
+import difflib
 import hashlib
 import html
 import json
@@ -469,6 +470,9 @@ def select_chats(chats: list[JsonDict], wanted: Optional[str]) -> list[JsonDict]
             hits = find(",".join(parts[i:j]))
             if hits:
                 picked.extend(hits)
+                if len(hits) > 1:
+                    print(f"Note: {len(hits)} chats are called '{clean_name(','.join(parts[i:j]))}'; "
+                          "exporting all of them. To pick one, use its ID from 'list --ids'.", file=sys.stderr)
                 i = j
                 break
         else:
@@ -476,7 +480,16 @@ def select_chats(chats: list[JsonDict], wanted: Optional[str]) -> list[JsonDict]
                 missing.append(parts[i].strip())
             i += 1
     if missing:
-        raise UserError("No chat named: " + ", ".join(missing) + " (see the exact names with 'list')")
+        hints = []
+        names = sorted({clean_name(c["name"]) or "" for c in chats})
+        for m in missing:
+            low = m.casefold()
+            close = [n for n in names if n.casefold().startswith(low)][:3]
+            close += [n for n in difflib.get_close_matches(m, names, n=3, cutoff=0.75) if n not in close]
+            if close:
+                hints.append(f"for '{m}' did you mean: " + "; ".join(close[:3]) + "?")
+        raise UserError("No chat named: " + ", ".join(missing) + " (see the exact names with 'list')"
+                        + "".join("\n       " + h for h in hints))
     unique = {c["pk"]: c for c in picked}
     return list(unique.values())
 
